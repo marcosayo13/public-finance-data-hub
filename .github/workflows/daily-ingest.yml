@@ -1,0 +1,355 @@
+name: Daily Data Ingest & Sync
+
+on:
+  schedule:
+    # Runs at 2 AM UTC (10 PM São Paulo time with daylight saving)
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Permite rodar manualmente
+
+jobs:
+  ingest-and-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      
+      - name: Create .env from secrets
+        run: |
+          cat > .env << 'EOF'
+          GOOGLE_DRIVE_FOLDER_ID=${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          FRED_API_KEY=${{ secrets.FRED_API_KEY }}
+          ANBIMA_CLIENT_ID=${{ secrets.ANBIMA_CLIENT_ID }}
+          ANBIMA_CLIENT_SECRET=${{ secrets.ANBIMA_CLIENT_SECRET }}
+          
+          # Rate limiting (em segundos)
+          RATE_LIMIT_DELAY_MIN=1.0
+          RATE_LIMIT_DELAY_MAX=3.0
+          
+          # Cache
+          CACHE_ENABLED=true
+          CACHE_TTL_HOURS=24
+          
+          # Logging
+          LOG_LEVEL=INFO
+          LOG_FILE=logs/pfdh_$(date +%Y%m%d).log
+          
+          # Timeout
+          REQUEST_TIMEOUT=30
+          MAX_RETRIES=3
+          EOF
+          
+          echo "✅ .env file created"
+      
+      - name: Create Google credentials from secrets
+        run: |
+          mkdir -p secrets
+          
+          # Salvar client_secret.json
+          echo '${{ secrets.GOOGLE_CLIENT_SECRET_JSON }}' > secrets/client_secret.json
+          
+          # Salvar token.json (se existir)
+          if [ ! -z '${{ secrets.GOOGLE_OAUTH_TOKEN }}' ]; then
+            echo '${{ secrets.GOOGLE_OAUTH_TOKEN }}' > token.json
+          fi
+          
+          echo "✅ Google credentials created"
+      
+      - name: Create logs directory
+        run: mkdir -p logs
+      
+      - name: Run API health check
+        continue-on-error: true
+        run: |
+          python << 'EOF'
+          import requests
+          from datetime import datetime
+          import logging
+          
+          logging.basicConfig(level=logging.INFO)
+          logger = logging.getLogger(__name__)
+          
+          apis = {
+              'BCB': 'https://www.bcb.gov.br/api/v1/dados/series/1/dados',
+              'FRED': 'https://api.stlouisfed.org/fred/series?api_key=${{ secrets.FRED_API_KEY }}&id=UNRATE&limit=1',
+              'ANBIMA': 'https://www.anbima.com.br',
+              'Yahoo': 'https://finance.yahoo.com',
+              'B3': 'https://www.b3.com.br'
+          }
+          
+          logger.info("\n" + "="*50)
+          logger.info("📊 API Health Status Check")
+          logger.info("="*50)
+          
+          results = {}
+          for name, url in apis.items():
+              try:
+                  r = requests.head(url, timeout=5, allow_redirects=True)
+                  status = '✅ OK' if r.status_code < 400 else f'⚠️  {r.status_code}'
+                  logger.info(f"{status} - {name}")
+                  results[name] = True
+              except Exception as e:
+                  logger.warning(f"❌ FAIL - {name}: {str(e)[:50]}")
+                  results[name] = False
+          
+          failed = sum(1 for v in results.values() if not v)
+          logger.info(f"\nResult: {len(results) - failed}/{len(results)} APIs accessible")
+          logger.info("="*50 + "\n")
+          EOF
+      
+      - name: Ingest data from all sources
+        run: |
+          python << 'EOF'
+          import logging
+          from datetime import datetime
+          from pathlib import Path
+          
+          # Configure logging
+          log_file = Path('logs/ingest.log')
+          logging.basicConfig(
+              level=logging.INFO,
+              format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+              handlers=[
+                  logging.FileHandler(log_file),
+                  logging.StreamHandler()
+              ]
+          )
+          logger = logging.getLogger(__name__)
+          
+          logger.info("\n" + "="*60)
+          logger.info(f"🔄 Starting Data Ingest - {datetime.now().isoformat()}")
+          logger.info("="*60)
+          
+          try:
+              # Importar módulos de ingestão
+              from public_finance_data_hub.sources.bcb import BCBSource
+              from public_finance_data_hub.sources.fred import FREDSource
+              from public_finance_data_hub.sources.anbima import AnbimaSource
+              from public_finance_data_hub.sources.yahoo import YahooSource
+              from public_finance_data_hub.sources.b3 import B3Source
+              
+              from public_finance_data_hub.core.rate_limiter import (
+                  BCB_LIMITER, FRED_LIMITER, ANBIMA_LIMITER,
+                  YAHOO_LIMITER, B3_LIMITER
+              )
+              
+              sources = [
+                  ('BCB', BCBSource(), BCB_LIMITER),
+                  ('FRED', FREDSource(), FRED_LIMITER),
+                  ('ANBIMA', AnbimaSource(), ANBIMA_LIMITER),
+                  ('YAHOO', YahooSource(), YAHOO_LIMITER),
+                  ('B3', B3Source(), B3_LIMITER),
+              ]
+              
+              total_records = 0
+              for source_name, source, limiter in sources:
+                  try:
+                      logger.info(f"\n📥 Ingest from {source_name}...")
+                      records = source.ingest()
+                      total_records += records
+                      logger.info(f"✅ {source_name}: {records} records ingested")
+                      logger.info(f"   Rate limiter stats: {limiter.get_stats()}")
+                  except Exception as e:
+                      logger.error(f"❌ {source_name} failed: {e}", exc_info=True)
+              
+              logger.info(f"\n✅ Total: {total_records} records ingested")
+          
+          except Exception as e:
+              logger.error(f"❌ Ingest pipeline failed: {e}", exc_info=True)
+              raise
+          
+          logger.info("="*60 + "\n")
+          EOF
+      
+      - name: Sync to Google Drive
+        run: |
+          python << 'EOF'
+          import logging
+          from datetime import datetime
+          from pathlib import Path
+          
+          log_file = Path('logs/sync.log')
+          logging.basicConfig(
+              level=logging.INFO,
+              format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+              handlers=[
+                  logging.FileHandler(log_file),
+                  logging.StreamHandler()
+              ]
+          )
+          logger = logging.getLogger(__name__)
+          
+          logger.info("\n" + "="*60)
+          logger.info(f"☁️  Starting Google Drive Sync - {datetime.now().isoformat()}")
+          logger.info("="*60)
+          
+          try:
+              from public_finance_data_hub.storage.google_drive import GoogleDriveSync
+              
+              sync = GoogleDriveSync(
+                  folder_id='${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}',
+                  compress=True,
+                  verify_ssl=True
+              )
+              
+              files_synced = sync.sync_all()
+              logger.info(f"✅ Synced {files_synced} files to Google Drive")
+          
+          except Exception as e:
+              logger.error(f"❌ Google Drive sync failed: {e}", exc_info=True)
+              # Não falhar o workflow se sync falhar
+              logger.warning("⚠️  Continuing despite sync failure...")
+          
+          logger.info("="*60 + "\n")
+          EOF
+      
+      - name: Generate report
+        if: always()
+        run: |
+          python << 'EOF'
+          import json
+          import logging
+          from datetime import datetime
+          from pathlib import Path
+          
+          logging.basicConfig(level=logging.INFO)
+          logger = logging.getLogger(__name__)
+          
+          try:
+              # Criar relatório
+              report = {
+                  'timestamp': datetime.now().isoformat(),
+                  'status': 'completed',
+                  'sources': ['BCB', 'FRED', 'ANBIMA', 'Yahoo Finance', 'B3'],
+                  'cache_enabled': True,
+                  'rate_limiting_enabled': True,
+              }
+              
+              # Salvar relatório
+              report_file = Path('logs') / f'report_{datetime.now().strftime("%Y%m%d")}.json'
+              with open(report_file, 'w') as f:
+                  json.dump(report, f, indent=2)
+              
+              logger.info(f"✅ Report saved to {report_file}")
+          
+          except Exception as e:
+              logger.error(f"Error generating report: {e}")
+          EOF
+      
+      - name: Upload logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pfdh-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 30
+      
+      - name: Check for errors in logs
+        if: always()
+        run: |
+          if grep -i "error\|failed" logs/*.log 2>/dev/null; then
+            echo "❌ Errors found in logs"
+            exit 1
+          else
+            echo "✅ No errors found"
+            exit 0
+          fi
+      
+      - name: Notify Slack on success
+        if: success()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "✅ PFDH Daily Sync Completed",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "✅ PFDH Daily Data Ingest"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Status:*\nCompleted ✅"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Time:*\n${{ job.container.network }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Sources:*\nBCB, FRED, ANBIMA, Yahoo, B3"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Features:*\n✅ Rate limiting\n✅ Cache\n✅ Retry"
+                    }
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Run"
+                      },
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    },
+                    {
+                      "type": "button",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "View Drive"
+                      },
+                      "url": "https://drive.google.com/drive/folders/${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}"
+                    }
+                  ]
+                }
+              ]
+            }
+      
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK }}
+          payload: |
+            {
+              "text": "❌ PFDH Daily Sync Failed",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "❌ PFDH Daily Ingest FAILED"
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "⚠️ Check the logs immediately:\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Full Run>"
+                  }
+                }
+              ]
+            }
