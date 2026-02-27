@@ -1,0 +1,183 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    name: Lint & Format Check
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install black flake8 isort
+      
+      - name: Check formatting with black
+        run: black --check src/ tests/
+      
+      - name: Check import sorting with isort
+        run: isort --check-only src/ tests/
+      
+      - name: Lint with flake8
+        run: flake8 src/ tests/ --max-line-length=100 --exclude=venv,build
+
+  test:
+    runs-on: ubuntu-latest
+    name: Tests & Coverage
+    
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Run pytest
+        run: |
+          pytest tests/ -v --cov=src/public_finance_data_hub \
+          --cov-report=xml --cov-report=term-missing
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  security:
+    runs-on: ubuntu-latest
+    name: Security Checks
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install security tools
+        run: |
+          pip install bandit safety
+      
+      - name: Run Bandit security check
+        run: bandit -r src/ --skip B101
+        continue-on-error: true
+
+  build:
+    runs-on: ubuntu-latest
+    name: Build Package
+    needs: [lint, test]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build wheel
+      
+      - name: Build distribution
+        run: python -m build
+      
+      - name: Check build artifacts
+        run: |
+          ls -lh dist/
+          python -m pip install dist/*.whl
+          pfdh --help
+
+  documentation:
+    runs-on: ubuntu-latest
+    name: Documentation Check
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Check README exists
+        run: |
+          if [ ! -f README.md ]; then
+            echo "README.md not found"
+            exit 1
+          fi
+          wc -l README.md
+      
+      - name: Check YAML config validity
+        run: |
+          python -c "import yaml; yaml.safe_load(open('src/public_finance_data_hub/config/sources.yml'))"
+          echo "✓ YAML config is valid"
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    name: Integration Tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Run integration tests
+        run: |
+          pytest tests/ -v -m integration --tb=short
+        continue-on-error: true
+
+status:
+  ci:
+    runs-on: ubuntu-latest
+    name: CI Status
+    needs: [lint, test, build]
+    if: always()
+    
+    steps:
+      - name: Check workflow status
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.build.result }}" != "success" ]; then
+            echo "CI pipeline failed"
+            exit 1
+          fi
+          echo "✓ CI pipeline passed"
