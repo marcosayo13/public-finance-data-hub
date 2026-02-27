@@ -1,0 +1,122 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "public-finance-data-hub"
+version = "1.0.0"
+description = "Production-grade repository for cataloging, downloading, and versioning public financial data with Google Drive sync"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Marcos Vinícius Miguel da Paixão"}]
+keywords = ["finance", "data-engineering", "etl", "b3", "cvm", "bcb", "sec", "fred"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+]
+
+dependencies = [
+    "typer[all]==0.9.0",
+    "pydantic==2.5.0",
+    "pandas==2.1.4",
+    "pyarrow==14.0.1",
+    "requests==2.31.0",
+    "pyyaml==6.0.1",
+    "python-dotenv==1.0.0",
+    "google-auth-oauthlib==1.2.0",
+    "google-auth-httplib2==0.2.0",
+    "google-api-python-client==2.107.0",
+    "sqlalchemy==2.0.23",
+    "xmltodict==12.0.1",
+    "beautifulsoup4==4.12.2",
+    "lxml==4.9.3",
+    "openpyxl==3.11.0",
+    "tenacity==8.2.3",
+    "python-logging-loki==0.3.2",
+    "pendulum==2.1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==7.4.3",
+    "pytest-cov==4.1.0",
+    "pytest-mock==3.12.0",
+    "black==23.12.0",
+    "isort==5.13.2",
+    "flake8==6.1.0",
+    "mypy==1.7.1",
+    "pre-commit==3.6.0",
+    "ipython==8.18.1",
+]
+
+[project.scripts]
+pfdh = "public_finance_data_hub.cli:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages]
+find = {where = ["src"]}
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["public_finance_data_hub"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "integration: marks tests as integration (deselect with '-m "not integration"')",
+    "slow: marks tests as slow (deselect with '-m "not slow"')",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src/public_finance_data_hub"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
