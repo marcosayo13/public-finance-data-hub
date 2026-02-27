@@ -1,0 +1,316 @@
+# Public Finance Data Hub - Data Sources Catalog
+# This file defines all supported data sources, endpoints, and metadata
+
+sources:
+  # ========== BRAZIL: Fundamentals ==========
+  cvm:
+    name: "CVM - Dados Abertos"
+    type: "fundamentals"
+    region: "Brazil"
+    description: "Brazilian Securities Commission open data - DFP, ITR, Company Registry, Funds"
+    
+    endpoints:
+      base: "https://dados.cvm.gov.br"
+      dfp: "/open-data/dfp/"
+      itr: "/open-data/itr/"
+      companies: "/open-data/cia_aberta/"
+      funds: "/open-data/fundo_imobiliario/"
+    
+    periodicity: "quarterly"  # DFP: annual, ITR: quarterly
+    format: "CSV/XML"
+    authentication: "none"
+    
+    data_domains:
+      - dfp
+      - itr
+      - company_registry
+      - funds_registry
+    
+    notes: "Official source for Brazilian company financials. Free access. High reliability."
+    official: true
+    regulatory: true
+
+  # ========== BRAZIL: Market Data ==========
+  b3:
+    name: "B3 - Histórico de Cotações"
+    type: "market_data"
+    region: "Brazil"
+    description: "Brazilian stock exchange market data - COTAHIST, ETF list, FII list"
+    
+    endpoints:
+      base: "https://www.b3.com.br"
+      cotahist: "/pt_br/market-data-e-indices/servicos-de-dados/market-data/historico/"
+      etf_list: "/pt_br/market-data-e-indices/consultas/etf/etf-consulta-publica/"
+      fii_list: "/pt_br/market-data-e-indices/consultas/fundos-imobiliarios/"
+    
+    periodicity: "daily"
+    format: "CSV/TXT"
+    authentication: "none"
+    
+    data_domains:
+      - cotahist
+      - etf
+      - fii
+    
+    notes: "Daily trading data. Free download. Official market data."
+    official: true
+    regulatory: false
+
+  # ========== BRAZIL: Macroeconomic ==========
+  bcb_sgs:
+    name: "BCB - SGS (Sistema de Gerenciamento de Séries Temporais)"
+    type: "macroeconomic"
+    region: "Brazil"
+    description: "Central Bank of Brazil macroeconomic time series - Selic, IPCA, Exchange, Credit"
+    
+    endpoints:
+      base: "https://www3.bcb.gov.br"
+      api: "/sgspub/consultarvalores"
+      download: "/sgspub/consultarDownload"
+    
+    periodicity: "daily"
+    format: "CSV/JSON"
+    authentication: "none"
+    api_type: "REST"
+    rate_limit: "120 requests/hour"
+    
+    data_domains:
+      - selic
+      - ipca
+      - exchange
+      - credit
+      - interest_rates
+    
+    key_series:
+      - "1": "Selic - Meta (% p.a.)"
+      - "4": "IPCA - Inflação (% p.a.)"
+      - "1": "USD/BRL - Taxa de câmbio"
+    
+    notes: "Official macroeconomic data. High availability. No authentication required."
+    official: true
+    regulatory: true
+
+  ipea:
+    name: "IPEA - Ipeadata"
+    type: "macroeconomic"
+    region: "Brazil"
+    description: "Institute of Applied Economic Research - Economic indicators and time series"
+    
+    endpoints:
+      base: "http://www.ipeadata.gov.br"
+      api: "/api/v1/"
+    
+    periodicity: "monthly/quarterly"
+    format: "JSON"
+    authentication: "optional"
+    api_type: "REST"
+    rate_limit: "no limit"
+    
+    data_domains:
+      - gdp
+      - unemployment
+      - industrial_production
+      - trade
+    
+    notes: "Comprehensive Brazilian economic data. API available. Public datasets."
+    official: true
+    regulatory: false
+
+  anbima:
+    name: "ANBIMA - Associação Brasileira das Entidades dos Mercados Financeiro e de Capitais"
+    type: "fixed_income"
+    region: "Brazil"
+    description: "Brazilian fixed income market association data - bonds, funds"
+    
+    endpoints:
+      base: "https://www.anbima.com.br"
+      data: "/informacoes/dados-publicos/"
+    
+    periodicity: "daily/monthly"
+    format: "CSV/Excel"
+    authentication: "optional_api_key"
+    api_key_env: "ANBIMA_API_KEY"
+    
+    data_domains:
+      - fixed_income
+      - bond_yields
+      - fund_data
+    
+    notes: "Public bond and fund data. Optional API key for extended access."
+    official: true
+    regulatory: false
+
+  dados_gov:
+    name: "dados.gov.br - Portal de Dados Abertos"
+    type: "aggregator"
+    region: "Brazil"
+    description: "Brazilian open data portal - curated datasets from various sources"
+    
+    endpoints:
+      base: "https://dados.gov.br"
+      api: "/api/3/action/"
+    
+    periodicity: "varies"
+    format: "CSV/JSON/XML"
+    authentication: "none"
+    
+    data_domains:
+      - various
+    
+    notes: "Aggregator portal. Manual dataset selection recommended. Not a primary source."
+    official: true
+    regulatory: false
+
+  # ========== USA: Fundamentals ==========
+  sec_edgar:
+    name: "SEC - EDGAR (Electronic Data Gathering)"
+    type: "fundamentals"
+    region: "USA"
+    description: "US Securities and Exchange Commission - Company filings (10-K, 10-Q, 8-K) and XBRL data"
+    
+    endpoints:
+      base: "https://www.sec.gov"
+      api: "/cgi-bin/browse-edgar"
+      data: "/cgi-bin/viewer"
+      xbrl: "/cgi-bin/viewer"
+    
+    periodicity: "real-time"
+    format: "HTML/XML/XBRL"
+    authentication: "none"
+    rate_limit: "10 requests/second (voluntary)"
+    
+    data_domains:
+      - company_filings
+      - company_facts
+      - xbrl_data
+    
+    notes: "Official US company financial data. High volume. XBRL available for structured data."
+    official: true
+    regulatory: true
+
+  # ========== USA: Macroeconomic ==========
+  fred:
+    name: "FRED - Federal Reserve Economic Data"
+    type: "macroeconomic"
+    region: "USA"
+    description: "US Federal Reserve - Economic indicators and time series (100,000+ series)"
+    
+    endpoints:
+      base: "https://api.stlouisfed.org"
+      api: "/fred"
+    
+    periodicity: "daily/monthly"
+    format: "JSON/CSV"
+    authentication: "api_key_required"
+    api_key_env: "FRED_API_KEY"
+    get_key_url: "https://fredaccount.stlouisfed.org/apikeys"
+    rate_limit: "120 requests/minute"
+    
+    data_domains:
+      - inflation
+      - unemployment
+      - gdp
+      - interest_rates
+      - stock_market
+    
+    notes: "Comprehensive US economic data. Free API key required. Highly reliable."
+    official: true
+    regulatory: true
+
+  world_bank:
+    name: "World Bank - Open Data"
+    type: "macroeconomic"
+    region: "Global"
+    description: "World Bank development indicators - 200+ countries, 1,400+ indicators"
+    
+    endpoints:
+      base: "https://api.worldbank.org"
+      api: "/v2"
+    
+    periodicity: "annual"
+    format: "JSON/XML"
+    authentication: "none"
+    rate_limit: "no specific limit"
+    
+    data_domains:
+      - gdp
+      - population
+      - poverty
+      - education
+      - health
+    
+    notes: "Global development data. Excellent for comparative analysis. Reliable source."
+    official: true
+    regulatory: false
+
+# ========== Data Domain Classification ==========
+domains:
+  market_data:
+    name: "Market Data"
+    description: "Real-time and historical trading prices, volumes, indices"
+    sources:
+      - b3
+  
+  fundamentals:
+    name: "Fundamentals"
+    description: "Company financial statements, balance sheets, income statements"
+    sources:
+      - cvm
+      - sec_edgar
+  
+  macroeconomic:
+    name: "Macroeconomic"
+    description: "GDP, inflation, employment, interest rates, exchange rates"
+    sources:
+      - bcb_sgs
+      - ipea
+      - fred
+      - world_bank
+  
+  fixed_income:
+    name: "Fixed Income"
+    description: "Bonds, debentures, fixed income funds, yield curves"
+    sources:
+      - anbima
+  
+  funds:
+    name: "Funds"
+    description: "Mutual funds, ETFs, Real Estate Investment Funds (FIIs)"
+    sources:
+      - cvm
+      - b3
+      - anbima
+
+# ========== Ingestion Strategy ==========
+ingestion_strategy:
+  # Retry configuration for all sources
+  retry:
+    max_attempts: 3
+    initial_backoff_seconds: 1
+    max_backoff_seconds: 60
+    backoff_factor: 2.0
+    jitter: true
+  
+  # Timeout configuration
+  timeout:
+    connect_seconds: 30
+    read_seconds: 60
+    total_seconds: 300
+  
+  # Chunking for large downloads
+  chunking:
+    chunk_size_mb: 50
+    parallel_workers: 4
+  
+  # Data quality
+  quality:
+    drop_duplicates: true
+    verify_checksums: true
+    validate_schema: true
+  
+  # Storage
+  storage:
+    format: "parquet"
+    compression: "snappy"
+    partitioning: ["year", "month"]
+    versioning: "enabled"
